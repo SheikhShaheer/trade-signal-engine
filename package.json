@@ -1,0 +1,38 @@
+{
+  "name": "trade-signal-engine",
+  "private": true,
+  "version": "0.1.0",
+  "description": "24/7 market scanner and trade decision engine. Produces decision memos for human review. Never executes trades.",
+  "type": "module",
+  "engines": {
+    "node": ">=20.11"
+  },
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspace @tse/core && npm run build --workspace @tse/api && npm run build --workspace @tse/worker",
+    "typecheck": "tsc --build --force",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "eslint .",
+    "db:up": "docker compose up -d postgres",
+    "db:down": "docker compose down",
+    "db:migrate": "npm run migrate --workspace @tse/core",
+    "db:seed": "npm run seed --workspace @tse/core",
+    "dev:worker": "npm run dev --workspace @tse/worker",
+    "dev:api": "npm run dev --workspace @tse/api",
+    "dev:dashboard": "npm run dev --workspace @tse/dashboard",
+    "pipeline:once": "npm run once --workspace @tse/worker",
+    "backtest": "npm run backtest --workspace @tse/core"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "eslint": "^9.17.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "typescript-eslint": "^8.18.1",
+    "vitest": "^2.1.8"
+  }
+}

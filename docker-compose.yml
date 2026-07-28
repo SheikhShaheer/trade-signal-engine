@@ -1,0 +1,21 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: tse-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: tse
+      POSTGRES_PASSWORD: tse
+      POSTGRES_DB: tse
+    ports:
+      - "5433:5432"
+    volumes:
+      - tse-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tse -d tse"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+volumes:
+  tse-pgdata:
