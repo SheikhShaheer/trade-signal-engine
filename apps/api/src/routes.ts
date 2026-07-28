@@ -7,7 +7,14 @@ import {
 import { HttpError, Router } from './router.js';
 
 const decisions: readonly Decision[] = ['approved', 'watchlist', 'rejected'];
-const reviewStatuses: readonly ReviewStatus[] = ['pending', 'acknowledged', 'dismissed', 'expired'];
+const reviewStatuses: readonly ReviewStatus[] = [
+  'pending',
+  'acknowledged',
+  'dismissed',
+  'expired',
+  'superseded',
+  'suppressed',
+];
 
 function parseList<T extends string>(raw: string | null, allowed: readonly T[], field: string): T[] | undefined {
   if (!raw) return undefined;
@@ -172,6 +179,29 @@ export function buildRoutes(deps: RouteDeps): Router {
     status: 200,
     body: await repositories.portfolio.current(config.account.startingEquity),
   }));
+
+  /**
+   * Operator-maintained account size. The engine only reads portfolio state —
+   * it never opens positions — so this is how a $10 (or any) account is set.
+   *
+   * Peak is reset to the new equity on purpose: changing account size is an
+   * operator action, not a trading loss. Keeping the old peak would make a
+   * move from $10,000 → $10 look like a 99% drawdown and block every plan.
+   */
+  router.put('/api/portfolio', async (ctx) => {
+    const body = (ctx.body ?? {}) as { equity?: unknown };
+    const equity = typeof body.equity === 'number' ? body.equity : Number.NaN;
+    if (!Number.isFinite(equity) || equity < 10) {
+      throw new HttpError(400, 'equity must be a number of at least 10');
+    }
+
+    const current = await repositories.portfolio.current(config.account.startingEquity);
+    await repositories.portfolio.recordState(equity, equity, current.dayRealisedPnl);
+    return {
+      status: 200,
+      body: await repositories.portfolio.current(config.account.startingEquity),
+    };
+  });
 
   router.get('/api/runs', async () => ({
     status: 200,

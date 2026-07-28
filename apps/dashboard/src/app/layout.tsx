@@ -1,16 +1,19 @@
 import type { Metadata } from 'next';
 import type { ReactNode } from 'react';
+import { AppShell } from '@/components/AppShell';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'Trade Decision Review Queue',
-  description: 'Human review gate for generated trade decision memos. This system never places orders.',
+  title: 'Signal Engine',
+  description: 'Manual trade-idea review tool. Never places orders.',
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body>
+        <AppShell>{children}</AppShell>
+      </body>
     </html>
   );
 }

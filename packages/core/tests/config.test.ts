@@ -48,9 +48,18 @@ describe('config', () => {
   });
 
   it('rejects a per-trade loss ceiling above the per-day ceiling', () => {
-    expect(() => loadConfig({ maxLoss: { perTradeAbsolute: 500, perDayAbsolute: 300 } })).toThrow(
-      /perTradeAbsolute cannot exceed/,
+    expect(() => loadConfig({ maxLoss: { perTradePctOfEquity: 0.05, perDayPctOfEquity: 0.03 } })).toThrow(
+      /perTradePctOfEquity cannot exceed/,
     );
+  });
+
+  it('accepts a starting equity as low as $10', () => {
+    const config = loadConfig({ account: { startingEquity: 10 } });
+    expect(config.account.startingEquity).toBe(10);
+  });
+
+  it('rejects a starting equity below $10', () => {
+    expect(() => loadConfig({ account: { startingEquity: 9.99 } })).toThrow();
   });
 
   it('rejects a first target that could never clear the minimum R:R', () => {

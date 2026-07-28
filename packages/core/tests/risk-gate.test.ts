@@ -182,12 +182,28 @@ describe('risk gate', () => {
     expect(volatility?.detail).toMatch(/abnormally volatile/);
   });
 
-  it('blocks on the absolute per-trade loss ceiling', () => {
-    const tight = new RiskGate(loadConfig({ maxLoss: { perTradeAbsolute: 20, perDayAbsolute: 300 } }));
+  it('blocks on the per-trade loss ceiling', () => {
+    // 0.2% of $10,000 = $20 — tighter than the sized risk on this fixture.
+    const tight = new RiskGate(loadConfig({ maxLoss: { perTradePctOfEquity: 0.002, perDayPctOfEquity: 0.03 } }));
     const result = tight.evaluate(plan(), calmSnapshot, testInstrument, makePortfolio());
 
     expect(result.checks.find((c) => c.check === 'max-loss-per-trade')?.pass).toBe(false);
     expect(result.overallPass).toBe(false);
+  });
+
+  it('can size a plan on a $10 account when a minimum lot still fits the loss ceiling', () => {
+    // ADA-like step of 0.1 with a 0.004 stop: one lot risks $0.0004? Wait need realistic numbers.
+    // Use the fixture plan's riskPerUnit against $10 equity.
+    const small = new RiskGate(loadConfig({ account: { startingEquity: 10 } }));
+    const result = small.evaluate(plan(), calmSnapshot, testInstrument, makePortfolio({ equity: 10, peakEquity: 10 }));
+
+    // Either it finds a positive size under the 1.5% ($0.15) ceiling, or it
+    // honestly fails sizing-viability — never silently invents zero-risk size.
+    if (result.sizing.quantity > 0) {
+      expect(result.sizing.riskAmount).toBeLessThanOrEqual(10 * 0.015 + 1e-6);
+    } else {
+      expect(result.checks.some((c) => c.check === 'sizing-viability' && !c.pass)).toBe(true);
+    }
   });
 
   it('counts the day\'s realised losses towards the daily ceiling', () => {

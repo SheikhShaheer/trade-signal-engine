@@ -79,8 +79,8 @@ function assertCoherent(config: EngineConfig): void {
   if (config.exposure.maxPerGroupPct > config.exposure.maxPortfolioPct) {
     problems.push('exposure.maxPerGroupPct cannot exceed exposure.maxPortfolioPct');
   }
-  if (config.maxLoss.perTradeAbsolute > config.maxLoss.perDayAbsolute) {
-    problems.push('maxLoss.perTradeAbsolute cannot exceed maxLoss.perDayAbsolute');
+  if (config.maxLoss.perTradePctOfEquity > config.maxLoss.perDayPctOfEquity) {
+    problems.push('maxLoss.perTradePctOfEquity cannot exceed maxLoss.perDayPctOfEquity');
   }
   if (config.volatility.minAtrRatio >= config.volatility.maxAtrRatio) {
     problems.push('volatility.minAtrRatio must be below volatility.maxAtrRatio');

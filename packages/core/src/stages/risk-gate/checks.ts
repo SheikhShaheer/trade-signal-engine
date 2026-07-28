@@ -206,20 +206,21 @@ export function volatilityCheck(ctx: CheckContext): RiskCheckResult {
 }
 
 /**
- * Check 5 — max loss. Two absolute ceilings the percentage-based sizing check
- * cannot express: worst case on this trade, and worst case for the day once
- * today's realised losses are counted.
+ * Check 5 — max loss. Two equity-relative ceilings the percentage-based sizing
+ * check cannot express on its own: worst case on this trade, and worst case for
+ * the day once today's realised losses are counted. Limits scale with equity
+ * so a $10 account and a $10,000 account follow the same rules.
  */
 export function maxLossChecks(ctx: CheckContext): RiskCheckResult[] {
   const { config, portfolio, sizing } = ctx;
   const currency = config.account.currency;
 
-  const perTradeLimit = config.maxLoss.perTradeAbsolute;
+  const perTradeLimit = portfolio.equity * config.maxLoss.perTradePctOfEquity;
   const perTradePass = sizing.riskAmount <= perTradeLimit + 1e-6;
 
   const realisedLoss = Math.max(0, -portfolio.dayRealisedPnl);
   const dayWorstCase = realisedLoss + sizing.riskAmount;
-  const perDayLimit = config.maxLoss.perDayAbsolute;
+  const perDayLimit = portfolio.equity * config.maxLoss.perDayPctOfEquity;
   const perDayPass = dayWorstCase <= perDayLimit + 1e-6;
 
   return [
@@ -232,9 +233,9 @@ export function maxLossChecks(ctx: CheckContext): RiskCheckResult[] {
       countsTowardMargin: true,
       detail: perTradePass
         ? `worst case at the stop is ${sizing.riskAmount.toFixed(2)} ${currency}, inside the ` +
-          `${perTradeLimit.toFixed(2)} per-trade ceiling`
+          `${perTradeLimit.toFixed(2)} per-trade ceiling (${(config.maxLoss.perTradePctOfEquity * 100).toFixed(1)}% of equity)`
         : `worst case at the stop is ${sizing.riskAmount.toFixed(2)} ${currency}, over the ` +
-          `${perTradeLimit.toFixed(2)} per-trade ceiling`,
+          `${perTradeLimit.toFixed(2)} per-trade ceiling (${(config.maxLoss.perTradePctOfEquity * 100).toFixed(1)}% of equity)`,
     },
     {
       check: 'max-loss-per-day',

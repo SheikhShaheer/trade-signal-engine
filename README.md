@@ -106,7 +106,7 @@ npm run db:down            # stop Postgres
 
 Every threshold in the system lives in `packages/core/src/config/default.ts` — risk percentages, exposure caps, drawdown limit, volatility band, detector parameters, score weights and decision cutoffs. Stages read limits from that object only; a magic number inside a stage is a bug.
 
-The defaults are a $10,000 account risking 1% per trade with a 10% maximum drawdown, scanning eight crypto majors.
+The defaults are a $10,000 account risking 1% per trade with a 10% maximum drawdown, scanning eight crypto majors. Account size can be set as low as **$10** in the dashboard Settings page (or by seeding `portfolio_state`); max-loss ceilings are percentages of equity so the same rules apply at every size.
 
 The config is validated on load by `packages/core/src/config/index.ts`, which also runs cross-field coherence checks that a per-field schema cannot express — a candle limit too small for the longest moving average, an approval threshold below the watchlist threshold, exposure caps that contradict each other, or a target multiple that could never clear the minimum R:R. These fail at startup rather than producing quietly wrong signals.
 
@@ -174,7 +174,7 @@ packages/core/          the whole engine as a library
   tests/                158 unit tests
 apps/worker/            the long-running 24/7 process
 apps/api/               HTTP API behind the dashboard
-apps/dashboard/         Next.js human review queue (stage 5)
+apps/dashboard/         Next.js review tool (multi-page: Overview, Review, Ideas, History, Settings)
 ```
 
 ## Operational notes

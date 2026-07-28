@@ -38,18 +38,22 @@ export const api = {
     return request<{ memos: Memo[]; count: number }>(`/api/memos?${query.toString()}`);
   },
 
+  memo: (id: number) => request<Memo>(`/api/memos/${id}`),
+
   pendingReview: () => request<{ memos: Memo[]; count: number }>('/api/review/pending'),
 
   stats: () => request<Stats>('/api/stats'),
 
   portfolio: () => request<Portfolio>('/api/portfolio'),
 
-  audit: () => request<{ entries: AuditEntry[] }>('/api/review/audit?limit=50'),
+  setEquity: (equity: number) =>
+    request<Portfolio>('/api/portfolio', {
+      method: 'PUT',
+      body: JSON.stringify({ equity }),
+    }),
 
-  /**
-   * Records a human review decision. Acknowledging requires a note; the API
-   * enforces that too, so this cannot be bypassed from another client.
-   */
+  audit: () => request<{ entries: AuditEntry[] }>('/api/review/audit?limit=100'),
+
   review: (memoId: number, action: 'acknowledged' | 'dismissed', notes: string, reviewer?: string) =>
     request<{ ok: true; memo: Memo; reminder: string }>(`/api/memos/${memoId}/review`, {
       method: 'POST',

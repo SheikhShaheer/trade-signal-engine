@@ -26,8 +26,11 @@ export const instrumentSchema = z.object({
 export type InstrumentConfig = z.infer<typeof instrumentSchema>;
 
 export const accountConfigSchema = z.object({
-  /** Starting equity used when the portfolio table has no rows yet. */
-  startingEquity: z.number().positive(),
+  /**
+   * Starting equity used when the portfolio table has no rows yet.
+   * Floor is $10 so tiny accounts are first-class, not an afterthought.
+   */
+  startingEquity: z.number().min(10),
   currency: z.string().default('USD'),
   /** Fraction of equity that may be lost on a single trade at the stop. */
   riskPerTradePct: z.number().positive().max(0.1),
@@ -57,10 +60,13 @@ export const volatilityConfigSchema = z.object({
 });
 
 export const maxLossConfigSchema = z.object({
-  /** Absolute worst-case loss ceiling for one trade, in account currency. */
-  perTradeAbsolute: z.number().positive(),
-  /** Absolute realised + proposed loss ceiling for one day. */
-  perDayAbsolute: z.number().positive(),
+  /**
+   * Worst-case loss ceiling for one trade as a fraction of equity.
+   * Equity-relative so a $10 account and a $10,000 account use the same rules.
+   */
+  perTradePctOfEquity: z.number().positive().max(1),
+  /** Realised + proposed loss ceiling for one day as a fraction of equity. */
+  perDayPctOfEquity: z.number().positive().max(1),
 });
 
 export const planningConfigSchema = z.object({

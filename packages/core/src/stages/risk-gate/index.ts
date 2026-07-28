@@ -77,11 +77,27 @@ export class RiskGate {
    * Size from risk, not from a fixed notional: quantity is the risk budget
    * divided by the per-unit stop distance, rounded down to the exchange's
    * quantity step so the real risk can only be lower than budgeted.
+   *
+   * Tiny accounts are special: a $10 account risking 1% ($0.10) often cannot
+   * buy even one BTC/ETH step at a normal stop. When the risk budget is
+   * positive but rounds to zero, we try one minimum lot — but only if that
+   * lot's stop risk still fits under the per-trade max-loss ceiling. That
+   * keeps $10 accounts productive without letting them take unbounded risk.
    */
   computeSizing(plan: TradePlan, instrument: InstrumentConfig, portfolio: PortfolioState): PositionSizing {
     const riskBudget = portfolio.equity * this.config.account.riskPerTradePct;
     const rawQuantity = plan.riskPerUnit > 0 ? riskBudget / plan.riskPerUnit : 0;
-    const quantity = roundDownToStep(Math.max(0, rawQuantity), instrument.quantityStep);
+    let quantity = roundDownToStep(Math.max(0, rawQuantity), instrument.quantityStep);
+
+    if (quantity <= 0 && rawQuantity > 0 && plan.riskPerUnit > 0) {
+      const minLot = instrument.quantityStep;
+      const minLotRisk = minLot * plan.riskPerUnit;
+      const perTradeCap = portfolio.equity * this.config.maxLoss.perTradePctOfEquity;
+      if (minLotRisk <= perTradeCap + 1e-9) {
+        quantity = minLot;
+      }
+    }
+
     const notional = quantity * plan.referenceEntry;
     const riskAmount = quantity * plan.riskPerUnit;
 

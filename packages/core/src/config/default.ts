@@ -43,9 +43,12 @@ export const defaultConfig: EngineConfig = {
     minAtrRatio: 0.3,
   },
 
+  // Equity-relative ceilings: 1.5% per trade / 3% per day works the same on
+  // a $10 account as on a $10,000 one. Absolute dollar caps would either
+  // ignore tiny accounts or silently block larger ones.
   maxLoss: {
-    perTradeAbsolute: 150,
-    perDayAbsolute: 300,
+    perTradePctOfEquity: 0.015,
+    perDayPctOfEquity: 0.03,
   },
 
   planning: {

@@ -52,6 +52,10 @@ export class Router {
     return this.add('POST', pattern, handler);
   }
 
+  put(pattern: string, handler: Handler): this {
+    return this.add('PUT', pattern, handler);
+  }
+
   private match(method: string, path: string): { handler: Handler; params: Record<string, string> } | undefined {
     const parts = path.split('/').filter(Boolean);
     for (const route of this.routes) {
@@ -87,7 +91,7 @@ export class Router {
     if (origin && allowedOrigins.includes(origin)) {
       res.setHeader('access-control-allow-origin', origin);
       res.setHeader('vary', 'origin');
-      res.setHeader('access-control-allow-methods', 'GET,POST,OPTIONS');
+      res.setHeader('access-control-allow-methods', 'GET,POST,PUT,OPTIONS');
       res.setHeader('access-control-allow-headers', 'content-type');
     }
 
