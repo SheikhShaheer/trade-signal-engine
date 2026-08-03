@@ -42,7 +42,7 @@ export function SignalDetail({ memo, onReviewed }: Props) {
       await api.review(memo.id, action, notes.trim());
       onReviewed?.();
       router.refresh();
-      router.push('/review');
+      router.push('/watchlist');
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Could not record the review.');
     } finally {
@@ -147,10 +147,17 @@ export function SignalDetail({ memo, onReviewed }: Props) {
         </section>
       </div>
 
-      {isPending ? (
+      {memo.decision === 'approved' && (
         <section className="review-box">
-          <h2>Your decision</h2>
-          <p>This only logs your choice. It does not place a trade.</p>
+          <h2>Bot action</h2>
+          <p>Approved memos are auto-traded in paper mode. Check Trades for fill details.</p>
+        </section>
+      )}
+
+      {isPending && memo.decision !== 'approved' ? (
+        <section className="review-box">
+          <h2>Watchlist note</h2>
+          <p>Watchlist ideas are not auto-traded. You can log a note for your records.</p>
           <textarea
             value={notes}
             onChange={(event) => setNotes(event.target.value)}

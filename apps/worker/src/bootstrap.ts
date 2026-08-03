@@ -1,11 +1,15 @@
 import {
   Pipeline,
+  PositionMonitor,
+  createExecutionProvider,
+  createBinanceTestnetClient,
   createMarketDataProvider,
   createNewsProvider,
   createLogger,
   createRepositories,
   getEnv,
-  loadConfig,
+  loadConfigFromEnv,
+  getTestnetCredentials,
   pingDatabase,
   runMigrations,
   getPool,
@@ -23,16 +27,12 @@ export interface Bootstrapped {
 
 /**
  * Shared start-up for the worker entry points: validate config and environment,
- * confirm the schema is present, and wire the providers into the pipeline.
- *
- * Failing loudly here is intentional. A scanner that starts with a broken
- * config and silently produces no signals is worse than one that refuses to
- * start.
+ * confirm the schema is present, and wire providers into the trading pipeline.
  */
 export async function bootstrap(component: string): Promise<Bootstrapped> {
   const env = getEnv();
   const logger = createLogger(env.LOG_LEVEL, { component });
-  const config = loadConfig();
+  const config = loadConfigFromEnv();
 
   logger.info('configuration loaded', {
     instruments: config.instruments.length,
@@ -43,6 +43,9 @@ export async function bootstrap(component: string): Promise<Bootstrapped> {
     newsProvider: env.NEWS_PROVIDER,
     approveAt: config.scoring.thresholds.approve,
     watchlistAt: config.scoring.thresholds.watchlist,
+    executionMode: config.execution.mode,
+    autoDecisions: config.execution.autoDecisions.join(','),
+    testnetConfigured: Boolean(getTestnetCredentials()),
   });
 
   if (!(await pingDatabase())) {
@@ -53,16 +56,48 @@ export async function bootstrap(component: string): Promise<Bootstrapped> {
   await runMigrations(getPool(), logger);
 
   const repositories = createRepositories();
+  await repositories.bot.syncExecutionMode(config.execution.mode);
+  await repositories.bot.syncApproveThreshold(config.scoring.thresholds.approve);
+
   const marketData = createMarketDataProvider(env, config.data);
   const news = createNewsProvider(env, config.data);
 
-  // Fail fast on a typo in the instrument list rather than logging a scan
-  // failure every five minutes forever.
   for (const instrument of config.instruments) {
     await marketData.assertSymbolSupported(instrument.symbol);
   }
   logger.info('instrument symbols verified', { provider: marketData.name, count: config.instruments.length });
 
-  const pipeline = new Pipeline({ config, repositories, marketData, news, logger });
+  const testnetCreds = getTestnetCredentials();
+  const testnetClient = testnetCreds
+    ? createBinanceTestnetClient({
+        apiKey: testnetCreds.apiKey,
+        apiSecret: testnetCreds.apiSecret,
+        baseUrl: testnetCreds.baseUrl,
+      })
+    : undefined;
+
+  const executor = createExecutionProvider({
+    config,
+    repositories,
+    logger,
+    client: testnetClient,
+  });
+  const positionMonitor = new PositionMonitor({
+    config,
+    repositories,
+    marketData,
+    executor,
+    logger,
+  });
+
+  const pipeline = new Pipeline({
+    config,
+    repositories,
+    marketData,
+    news,
+    executor,
+    positionMonitor,
+    logger,
+  });
   return { config, logger, repositories, pipeline };
 }

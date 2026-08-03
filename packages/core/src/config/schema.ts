@@ -209,6 +209,20 @@ export const dataConfigSchema = z.object({
   newsMaxAgeHours: z.number().positive(),
 });
 
+export const executionConfigSchema = z.object({
+  /** paper = simulated; testnet = Binance Spot Testnet; live = future phase. */
+  mode: z.enum(['paper', 'testnet', 'live']).default('paper'),
+  /** Memo decisions the bot will act on automatically. */
+  autoDecisions: z.array(z.enum(['approved', 'watchlist'])).min(1).default(['approved']),
+  /** Simulated slippage applied against the fill price, in basis points. */
+  slippageBps: z.number().min(0).max(1000).default(5),
+  /** Simulated trading fee as a fraction of notional, in basis points. */
+  feeBps: z.number().min(0).max(1000).default(10),
+  /** Kill switch: halts new entries; position monitor still runs. */
+  paused: z.boolean().default(false),
+});
+export type ExecutionConfig = z.infer<typeof executionConfigSchema>;
+
 export const reviewConfigSchema = z.object({
   /**
    * Pending items older than this are marked expired rather than silently
@@ -245,6 +259,7 @@ export const engineConfigSchema = z.object({
   schedule: scheduleConfigSchema,
   data: dataConfigSchema,
   review: reviewConfigSchema,
+  execution: executionConfigSchema,
 });
 
 export type EngineConfig = z.infer<typeof engineConfigSchema>;

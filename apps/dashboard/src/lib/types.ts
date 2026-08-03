@@ -90,8 +90,10 @@ export interface Memo {
 
 export interface Stats {
   last24h: Record<Decision, number>;
-  pendingReview: number;
+  openPositions: number;
   snapshotsStored: number;
+  executedLastRun: number;
+  bot: { paused: boolean; mode: string };
   lastRun: {
     startedAt: string;
     finishedAt: string;
@@ -101,18 +103,63 @@ export interface Stats {
     plansBuilt: number;
     riskGatePassed: number;
     riskGateBlocked: number;
-    queuedForReview: number;
-    supersededDuplicates: number;
-    suppressedDuplicates: number;
+    approved: number;
+    watchlist: number;
+    rejected: number;
+    executed: number;
+    executionSkipped: number;
+    positionsClosed: number;
     errors: string[];
   } | null;
+}
+
+export interface BotStatus {
+  mode: string;
+  paused: boolean;
+  approveThreshold: number;
+  testnetConfigured: boolean;
+  updatedAt?: string;
+  equity: number;
+  dayRealisedPnl: number;
+  openCount: number;
+  openPositions: OpenPosition[];
+  lastTrade: TradeRecord | null;
+}
+
+export interface OpenPosition {
+  id?: number;
+  instrument: string;
+  direction: Direction;
+  quantity: number;
+  entryPrice: number;
+  stopLoss: number;
+  takeProfit?: number;
+  notional: number;
+  openedAt: string;
+  memoId?: number;
+}
+
+export interface TradeRecord {
+  memoId: number;
+  instrument: string;
+  direction: Direction;
+  realisedPnl?: number;
+  order: {
+    id: number;
+    createdAt: string;
+    quantity: number;
+    status: string;
+    mode?: string;
+  };
+  entryFill?: { price: number; fee: number; filledAt: string };
+  exitFill?: { price: number; fee: number; filledAt: string };
 }
 
 export interface Portfolio {
   equity: number;
   peakEquity: number;
   dayRealisedPnl: number;
-  openPositions: { instrument: string; direction: Direction; notional: number }[];
+  openPositions: { instrument: string; direction: Direction; notional: number; entryPrice?: number; stopLoss?: number; takeProfit?: number }[];
   asOf: string;
 }
 

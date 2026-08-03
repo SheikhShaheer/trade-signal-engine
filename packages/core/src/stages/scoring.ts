@@ -187,10 +187,29 @@ export class DecisionScorer {
    */
   decide(score: number, riskGatePassed: boolean): Decision {
     if (!riskGatePassed) return 'rejected';
-    const { approve, watchlist } = this.config.scoring.thresholds;
+    const { approve, watchlist } = this.effectiveThresholds();
     if (score >= approve) return 'approved';
     if (score >= watchlist) return 'watchlist';
     return 'rejected';
+  }
+
+  /** Override the file default; used when the operator changes the bar in Settings. */
+  setApproveThreshold(threshold: number): void {
+    this.approveThresholdOverride = threshold;
+  }
+
+  effectiveApproveThreshold(): number {
+    return this.effectiveThresholds().approve;
+  }
+
+  private approveThresholdOverride?: number;
+
+  private effectiveThresholds(): { approve: number; watchlist: number } {
+    const base = this.config.scoring.thresholds;
+    return {
+      approve: this.approveThresholdOverride ?? base.approve,
+      watchlist: base.watchlist,
+    };
   }
 
   buildMemo(input: {
@@ -262,14 +281,15 @@ export class DecisionScorer {
 
     const weakest = [...components].sort((a, b) => a.raw - b.raw)[0];
     const strongest = [...components].sort((a, b) => b.raw - a.raw)[0];
+    const { approve, watchlist } = this.effectiveThresholds();
     const decisionReason =
       decision === 'rejected' && !riskGate.overallPass
         ? 'rejected because the risk gate failed, which overrides the score'
         : decision === 'rejected'
-          ? `rejected because ${score.toFixed(2)} is below the ${this.config.scoring.thresholds.watchlist} watchlist cutoff`
+          ? `rejected because ${score.toFixed(2)} is below the ${watchlist} watchlist cutoff`
           : decision === 'watchlist'
-            ? `queued to the watchlist: ${score.toFixed(2)} clears ${this.config.scoring.thresholds.watchlist} but not the ${this.config.scoring.thresholds.approve} approval bar`
-            : `queued for approval: ${score.toFixed(2)} clears the ${this.config.scoring.thresholds.approve} bar`;
+            ? `queued to the watchlist: ${score.toFixed(2)} clears ${watchlist} but not the ${approve} approval bar`
+            : `queued for approval: ${score.toFixed(2)} clears the ${approve} bar`;
 
     sentences.push(
       `Scored ${score.toFixed(2)}/10 and ${decisionReason}` +

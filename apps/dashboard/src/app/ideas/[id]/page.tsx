@@ -4,6 +4,7 @@ import { Suspense, useCallback, useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { SignalDetail } from '@/components/SignalDetail';
+import { TradingViewChart } from '@/components/TradingViewChart';
 import { api, API_BASE_URL } from '@/lib/api';
 import type { Memo } from '@/lib/types';
 
@@ -30,12 +31,14 @@ function IdeaDetailInner() {
     void load();
   }, [load]);
 
+  const plan = memo?.tradePlan;
+
   return (
     <div className="page">
       <div className="page-head">
         <div>
-          <Link href="/review" className="back-link">
-            ← Review
+          <Link href="/ideas" className="back-link">
+            ← Ideas
           </Link>
           <h1>Idea detail</h1>
         </div>
@@ -44,6 +47,17 @@ function IdeaDetailInner() {
         <div className="banner" role="alert">
           {error}
         </div>
+      )}
+      {memo && plan && (
+        <section className="panel">
+          <TradingViewChart
+            symbol={memo.instrument}
+            entry={plan.referenceEntry}
+            stop={plan.stopLoss}
+            target={plan.targets[0]}
+            height={520}
+          />
+        </section>
       )}
       {memo && <SignalDetail memo={memo} onReviewed={() => void load()} />}
     </div>

@@ -235,14 +235,19 @@ export interface RiskGateResult {
 }
 
 export interface OpenPosition {
+  id?: number;
   instrument: string;
   correlationGroup: string;
   direction: Direction;
   quantity: number;
   entryPrice: number;
   stopLoss: number;
+  takeProfit?: number;
   notional: number;
   openedAt: string;
+  memoId?: number;
+  orderId?: number;
+  source?: 'bot' | 'manual';
 }
 
 export interface PortfolioState {
@@ -298,7 +303,14 @@ export interface ReviewItem {
 // Pipeline
 // ---------------------------------------------------------------------------
 
-export type PipelineStage = 'scanner' | 'detector' | 'planner' | 'risk-gate' | 'scoring' | 'review-queue';
+export type PipelineStage =
+  | 'scanner'
+  | 'detector'
+  | 'planner'
+  | 'risk-gate'
+  | 'scoring'
+  | 'review-queue'
+  | 'execution';
 
 /** Why an instrument stopped short of producing a queued memo. */
 export interface PipelineDrop {
@@ -327,8 +339,64 @@ export interface PipelineRunStats {
   supersededDuplicates: number;
   /** Memos kept out of the queue because a human decided on the idea recently. */
   suppressedDuplicates: number;
+  /** Paper/live entries filled this run. */
+  executed: number;
+  /** Approved memos that did not trade (paused, cooldown, duplicate position, etc.). */
+  executionSkipped: number;
+  /** Open positions closed by the monitor this run. */
+  positionsClosed: number;
+  executionErrors: number;
   drops: PipelineDrop[];
   errors: string[];
+}
+
+// ---------------------------------------------------------------------------
+// Execution
+// ---------------------------------------------------------------------------
+
+export type ExecutionMode = 'paper' | 'testnet' | 'live';
+export type OrderStatus = 'pending' | 'filled' | 'rejected' | 'cancelled';
+export type FillType = 'entry' | 'exit';
+export type ExecutionEventType =
+  | 'submitted'
+  | 'filled'
+  | 'rejected'
+  | 'sl_hit'
+  | 'tp_hit'
+  | 'skipped'
+  | 'paused'
+  | 'closed';
+
+export interface ExecutionOrder {
+  id: number;
+  memoId: number;
+  mode: ExecutionMode;
+  instrument: string;
+  direction: Direction;
+  quantity: number;
+  requestedPrice: number;
+  status: OrderStatus;
+  createdAt: string;
+}
+
+export interface ExecutionFill {
+  id: number;
+  orderId: number;
+  price: number;
+  quantity: number;
+  fee: number;
+  fillType: FillType;
+  filledAt: string;
+}
+
+export interface TradeRecord {
+  order: ExecutionOrder;
+  entryFill?: ExecutionFill;
+  exitFill?: ExecutionFill;
+  memoId: number;
+  instrument: string;
+  direction: Direction;
+  realisedPnl?: number;
 }
 
 export interface RankedMemo extends DecisionMemo {

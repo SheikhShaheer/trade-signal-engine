@@ -5,20 +5,20 @@ import {
   createRepositories,
   getEnv,
   getPool,
-  loadConfig,
+  getTestnetCredentials,
+  loadConfigFromEnv,
   pingDatabase,
   runMigrations,
 } from '@tse/core';
 import { buildRoutes } from './routes.js';
 
 /**
- * HTTP API behind the review dashboard. Binds to 127.0.0.1 by default: this
- * surface is for a local operator, not the internet.
+ * HTTP API for the paper-trading bot dashboard.
  */
 async function main(): Promise<void> {
   const env = getEnv();
   const logger = createLogger(env.LOG_LEVEL, { component: 'api' });
-  const config = loadConfig();
+  const config = loadConfigFromEnv();
 
   if (!(await pingDatabase())) {
     throw new Error(`cannot reach Postgres at ${env.DATABASE_URL}. Start it with "npm run db:up".`);
@@ -42,7 +42,8 @@ async function main(): Promise<void> {
   server.listen(env.API_PORT, env.API_HOST, () => {
     logger.info('api listening', {
       url: `http://${env.API_HOST}:${env.API_PORT}`,
-      autoExecution: false,
+      autoExecution: true,
+      mode: config.execution.mode,
     });
   });
 

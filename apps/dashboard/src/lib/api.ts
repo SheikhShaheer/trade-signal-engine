@@ -1,4 +1,4 @@
-import type { AuditEntry, Memo, Portfolio, Stats } from './types';
+import type { AuditEntry, BotStatus, Memo, OpenPosition, Portfolio, Stats, TradeRecord } from './types';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://127.0.0.1:4000';
 
@@ -40,9 +40,37 @@ export const api = {
 
   memo: (id: number) => request<Memo>(`/api/memos/${id}`),
 
-  pendingReview: () => request<{ memos: Memo[]; count: number }>('/api/review/pending'),
+  watchlist: () => request<{ memos: Memo[]; count: number }>('/api/watchlist'),
 
   stats: () => request<Stats>('/api/stats'),
+
+  botStatus: () => request<BotStatus>('/api/bot/status'),
+
+  pauseBot: () => request<{ ok: true; paused: boolean }>('/api/bot/pause', { method: 'POST', body: '{}' }),
+
+  resumeBot: () => request<{ ok: true; paused: boolean }>('/api/bot/resume', { method: 'POST', body: '{}' }),
+
+  setExecutionMode: (mode: 'paper' | 'testnet') =>
+    request<{ ok: true; mode: string }>('/api/bot/execution-mode', {
+      method: 'PUT',
+      body: JSON.stringify({ mode }),
+    }),
+
+  setApproveThreshold: (threshold: number) =>
+    request<{ ok: true; threshold: number }>('/api/bot/approve-threshold', {
+      method: 'PUT',
+      body: JSON.stringify({ threshold }),
+    }),
+
+  config: () =>
+    request<{
+      execution: { mode: string; slippageBps: number; feeBps: number };
+      scoring: { thresholds: { approve: number; watchlist: number } };
+    }>('/api/config'),
+
+  trades: (limit = 50) => request<{ trades: TradeRecord[]; count: number }>(`/api/trades?limit=${limit}`),
+
+  positions: () => request<{ positions: OpenPosition[]; count: number }>('/api/positions'),
 
   portfolio: () => request<Portfolio>('/api/portfolio'),
 
@@ -55,7 +83,7 @@ export const api = {
   audit: () => request<{ entries: AuditEntry[] }>('/api/review/audit?limit=100'),
 
   review: (memoId: number, action: 'acknowledged' | 'dismissed', notes: string, reviewer?: string) =>
-    request<{ ok: true; memo: Memo; reminder: string }>(`/api/memos/${memoId}/review`, {
+    request<{ ok: true; memo: Memo }>(`/api/memos/${memoId}/review`, {
       method: 'POST',
       body: JSON.stringify({ action, notes, reviewer }),
     }),

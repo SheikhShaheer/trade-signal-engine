@@ -244,6 +244,13 @@ describe('decision thresholds', () => {
     expect(strict.decide(9, true)).toBe('approved');
     expect(strict.decide(7.9, true)).toBe('rejected');
   });
+
+  it('honours runtime approve threshold override from settings', () => {
+    scorer.setApproveThreshold(6);
+    expect(scorer.decide(6, true)).toBe('approved');
+    expect(scorer.decide(5.5, true)).toBe('watchlist');
+    expect(scorer.effectiveApproveThreshold()).toBe(6);
+  });
 });
 
 describe('decision memo', () => {

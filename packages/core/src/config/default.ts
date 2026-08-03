@@ -123,4 +123,12 @@ export const defaultConfig: EngineConfig = {
     supersedePendingDuplicates: true,
     duplicateCooldownMinutes: 120,
   },
+
+  execution: {
+    mode: 'paper',
+    autoDecisions: ['approved'],
+    slippageBps: 5,
+    feeBps: 10,
+    paused: false,
+  },
 };

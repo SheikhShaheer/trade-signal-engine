@@ -43,8 +43,9 @@ async function main(): Promise<void> {
   });
 
   scheduler.start();
-  logger.info('worker running; this process only writes memos to the review queue and never places orders', {
+  logger.info('worker running; paper trading bot active', {
     intervalSec: config.schedule.pipelineIntervalSec,
+    mode: config.execution.mode,
   });
 }
 

@@ -1,7 +1,12 @@
 import type {
   DecisionMemo,
   Decision,
+  Direction,
   EnqueueOutcome,
+  ExecutionEventType,
+  ExecutionFill,
+  ExecutionMode,
+  ExecutionOrder,
   MarketSnapshot,
   OpenPosition,
   PipelineRunStats,
@@ -12,6 +17,7 @@ import type {
   RiskGateResult,
   SignalCandidate,
   TradePlan,
+  TradeRecord,
 } from '../types.js';
 import { getPool, withTransaction, type DbClient, type DbPool } from './pool.js';
 
@@ -574,6 +580,27 @@ export class ReviewQueueRepository {
       createdAt: iso(r.created_at),
     }));
   }
+
+  /** True when a human dismissed this instrument + direction inside the cooldown window. */
+  async recentHumanDismissal(
+    instrument: string,
+    direction: Direction,
+    cooldownMinutes: number,
+  ): Promise<boolean> {
+    const { rows } = await this.db.query<{ exists: boolean }>(
+      `SELECT EXISTS (
+         SELECT 1
+           FROM review_queue r
+           JOIN decision_memos m ON m.id = r.memo_id
+          WHERE m.instrument = $1
+            AND m.direction = $2
+            AND r.status = 'dismissed'
+            AND r.reviewed_at > now() - ($3 || ' minutes')::interval
+       ) AS exists`,
+      [instrument, direction, String(cooldownMinutes)],
+    );
+    return rows[0]?.exists ?? false;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -615,25 +642,40 @@ export class PortfolioRepository {
 
   async openPositions(): Promise<OpenPosition[]> {
     const { rows } = await this.db.query<{
+      id: number;
       instrument: string;
       correlation_group: string;
       direction: 'long' | 'short';
       quantity: number;
       entry_price: number;
       stop_loss: number;
+      take_profit: number | null;
       notional: number;
       opened_at: Date;
+      memo_id: number | null;
+      order_id: number | null;
+      source: string;
     }>('SELECT * FROM open_positions WHERE closed_at IS NULL ORDER BY opened_at DESC');
     return rows.map((r) => ({
+      id: r.id,
       instrument: r.instrument,
       correlationGroup: r.correlation_group,
       direction: r.direction,
       quantity: r.quantity,
       entryPrice: r.entry_price,
       stopLoss: r.stop_loss,
+      takeProfit: r.take_profit ?? undefined,
       notional: r.notional,
       openedAt: iso(r.opened_at),
+      memoId: r.memo_id ?? undefined,
+      orderId: r.order_id ?? undefined,
+      source: r.source === 'manual' ? 'manual' : 'bot',
     }));
+  }
+
+  async openBotPositions(): Promise<OpenPosition[]> {
+    const all = await this.openPositions();
+    return all.filter((p) => p.source !== 'manual');
   }
 
   async recordState(equity: number, peakEquity: number, dayRealisedPnl: number): Promise<void> {
@@ -641,6 +683,368 @@ export class PortfolioRepository {
       'INSERT INTO portfolio_state (equity, peak_equity, day_realised_pnl) VALUES ($1,$2,$3)',
       [equity, peakEquity, dayRealisedPnl],
     );
+  }
+
+  async applyRealisedPnl(pnl: number): Promise<PortfolioState> {
+    const current = await this.current(0);
+    const equity = current.equity + pnl;
+    const peakEquity = Math.max(current.peakEquity, equity);
+    const dayRealisedPnl = current.dayRealisedPnl + pnl;
+    await this.recordState(equity, peakEquity, dayRealisedPnl);
+    return this.current(equity);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Paper/live execution persistence
+// ---------------------------------------------------------------------------
+
+export class ExecutionRepository {
+  constructor(private readonly db: Queryable = getPool()) {}
+
+  async isPaused(): Promise<boolean> {
+    const { rows } = await this.db.query<{ paused: boolean }>('SELECT paused FROM bot_runtime WHERE id = 1');
+    return rows[0]?.paused ?? false;
+  }
+
+  async setPaused(paused: boolean): Promise<void> {
+    await this.db.query('UPDATE bot_runtime SET paused = $1, updated_at = now() WHERE id = 1', [paused]);
+  }
+
+  async logEvent(input: {
+    memoId?: number;
+    orderId?: number;
+    positionId?: number;
+    eventType: ExecutionEventType;
+    detail?: string;
+  }): Promise<void> {
+    await this.db.query(
+      `INSERT INTO execution_events (memo_id, order_id, position_id, event_type, detail)
+       VALUES ($1,$2,$3,$4,$5)`,
+      [input.memoId ?? null, input.orderId ?? null, input.positionId ?? null, input.eventType, input.detail ?? null],
+    );
+  }
+
+  async recentTradeOnIdea(
+    instrument: string,
+    direction: Direction,
+    cooldownMinutes: number,
+  ): Promise<boolean> {
+    const { rows } = await this.db.query<{ exists: boolean }>(
+      `SELECT EXISTS (
+         SELECT 1
+           FROM execution_orders o
+          WHERE o.instrument = $1
+            AND o.direction = $2
+            AND o.status = 'filled'
+            AND o.created_at > now() - ($3 || ' minutes')::interval
+       ) AS exists`,
+      [instrument, direction, String(cooldownMinutes)],
+    );
+    return rows[0]?.exists ?? false;
+  }
+
+  async createEntry(input: {
+    memoId: number;
+    mode: ExecutionMode;
+    instrument: string;
+    direction: Direction;
+    quantity: number;
+    requestedPrice: number;
+    fillPrice: number;
+    fee: number;
+    correlationGroup: string;
+    stopLoss: number;
+    takeProfit: number;
+    notional: number;
+    externalOrderId?: number;
+  }): Promise<{ orderId: number; positionId: number }> {
+    return withTransaction(async (client) => {
+      const { rows: orderRows } = await client.query<{ id: number }>(
+        `INSERT INTO execution_orders (memo_id, mode, instrument, direction, quantity, requested_price, status)
+         VALUES ($1,$2,$3,$4,$5,$6,'filled') RETURNING id`,
+        [
+          input.memoId,
+          input.mode,
+          input.instrument,
+          input.direction,
+          input.quantity,
+          input.requestedPrice,
+        ],
+      );
+      const orderId = orderRows[0]!.id;
+
+      await client.query(
+        `INSERT INTO execution_fills (order_id, price, quantity, fee, fill_type)
+         VALUES ($1,$2,$3,$4,'entry')`,
+        [orderId, input.fillPrice, input.quantity, input.fee],
+      );
+
+      const { rows: posRows } = await client.query<{ id: number }>(
+        `INSERT INTO open_positions
+           (instrument, correlation_group, direction, quantity, entry_price, stop_loss, notional,
+            memo_id, order_id, take_profit, source)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'bot') RETURNING id`,
+        [
+          input.instrument,
+          input.correlationGroup,
+          input.direction,
+          input.quantity,
+          input.fillPrice,
+          input.stopLoss,
+          input.notional,
+          input.memoId,
+          orderId,
+          input.takeProfit,
+        ],
+      );
+      const positionId = posRows[0]!.id;
+
+      await client.query(
+        `INSERT INTO execution_events (memo_id, order_id, position_id, event_type, detail)
+         VALUES ($1,$2,$3,'filled', $4)`,
+        [
+          input.memoId,
+          orderId,
+          positionId,
+          input.externalOrderId
+            ? `entry @ ${input.fillPrice} (binance ${input.externalOrderId})`
+            : `entry @ ${input.fillPrice}`,
+        ],
+      );
+
+      return { orderId, positionId };
+    });
+  }
+
+  async createExit(input: {
+    positionId: number;
+    orderId?: number;
+    memoId?: number;
+    exitPrice: number;
+    quantity: number;
+    fee: number;
+    realisedPnl: number;
+    eventType: ExecutionEventType;
+    externalOrderId?: number;
+  }): Promise<void> {
+    await withTransaction(async (client) => {
+      const { rows: posRows } = await client.query<{
+        entry_price: number;
+        direction: Direction;
+        instrument: string;
+        order_id: number | null;
+      }>(
+        `UPDATE open_positions SET closed_at = now() WHERE id = $1 AND closed_at IS NULL
+         RETURNING entry_price, direction, instrument, order_id`,
+        [input.positionId],
+      );
+      const pos = posRows[0];
+      if (!pos) throw new Error(`position ${input.positionId} not found or already closed`);
+
+      const orderId = input.orderId ?? pos.order_id ?? undefined;
+
+      if (orderId) {
+        await client.query(
+          `INSERT INTO execution_fills (order_id, price, quantity, fee, fill_type)
+           VALUES ($1,$2,$3,$4,'exit')`,
+          [orderId, input.exitPrice, input.quantity, input.fee],
+        );
+      }
+
+      const { rows: stateRows } = await client.query<{
+        equity: number;
+        peak_equity: number;
+        day_realised_pnl: number;
+      }>('SELECT equity, peak_equity, day_realised_pnl FROM portfolio_state ORDER BY as_of DESC LIMIT 1');
+
+      const prev = stateRows[0];
+      const equity = (prev?.equity ?? 0) + input.realisedPnl;
+      const peakEquity = Math.max(prev?.peak_equity ?? equity, equity);
+      const dayPnl = (prev?.day_realised_pnl ?? 0) + input.realisedPnl;
+
+      await client.query(
+        'INSERT INTO portfolio_state (equity, peak_equity, day_realised_pnl) VALUES ($1,$2,$3)',
+        [equity, peakEquity, dayPnl],
+      );
+
+      await client.query(
+        `INSERT INTO execution_events (memo_id, order_id, position_id, event_type, detail)
+         VALUES ($1,$2,$3,$4,$5)`,
+        [
+          input.memoId ?? null,
+          orderId ?? null,
+          input.positionId,
+          input.eventType,
+          input.externalOrderId
+            ? `exit @ ${input.exitPrice}, pnl ${input.realisedPnl.toFixed(2)} (binance ${input.externalOrderId})`
+            : `exit @ ${input.exitPrice}, pnl ${input.realisedPnl.toFixed(2)}`,
+        ],
+      );
+    });
+  }
+
+  async recentTrades(limit = 50): Promise<TradeRecord[]> {
+    const { rows } = await this.db.query<{
+      id: number;
+      memo_id: number;
+      mode: ExecutionMode;
+      instrument: string;
+      direction: Direction;
+      quantity: number;
+      requested_price: number;
+      status: string;
+      created_at: Date;
+    }>(
+      `SELECT * FROM execution_orders ORDER BY created_at DESC LIMIT $1`,
+      [limit],
+    );
+
+    const out: TradeRecord[] = [];
+    for (const row of rows) {
+      const { rows: fills } = await this.db.query<{
+        id: number;
+        order_id: number;
+        price: number;
+        quantity: number;
+        fee: number;
+        fill_type: 'entry' | 'exit';
+        filled_at: Date;
+      }>('SELECT * FROM execution_fills WHERE order_id = $1 ORDER BY filled_at', [row.id]);
+
+      const entryFill = fills.find((f) => f.fill_type === 'entry');
+      const exitFill = fills.find((f) => f.fill_type === 'exit');
+      let realisedPnl: number | undefined;
+      if (entryFill && exitFill) {
+        const gross =
+          row.direction === 'long'
+            ? (exitFill.price - entryFill.price) * row.quantity
+            : (entryFill.price - exitFill.price) * row.quantity;
+        realisedPnl = gross - entryFill.fee - exitFill.fee;
+      }
+
+      out.push({
+        order: {
+          id: row.id,
+          memoId: row.memo_id,
+          mode: row.mode,
+          instrument: row.instrument,
+          direction: row.direction,
+          quantity: row.quantity,
+          requestedPrice: row.requested_price,
+          status: row.status as ExecutionOrder['status'],
+          createdAt: iso(row.created_at),
+        },
+        entryFill: entryFill
+          ? {
+              id: entryFill.id,
+              orderId: entryFill.order_id,
+              price: entryFill.price,
+              quantity: entryFill.quantity,
+              fee: entryFill.fee,
+              fillType: 'entry',
+              filledAt: iso(entryFill.filled_at),
+            }
+          : undefined,
+        exitFill: exitFill
+          ? {
+              id: exitFill.id,
+              orderId: exitFill.order_id,
+              price: exitFill.price,
+              quantity: exitFill.quantity,
+              fee: exitFill.fee,
+              fillType: 'exit',
+              filledAt: iso(exitFill.filled_at),
+            }
+          : undefined,
+        memoId: row.memo_id,
+        instrument: row.instrument,
+        direction: row.direction,
+        realisedPnl,
+      });
+    }
+    return out;
+  }
+
+  async lastTrade(): Promise<TradeRecord | undefined> {
+    const trades = await this.recentTrades(1);
+    return trades[0];
+  }
+}
+
+export class BotRuntimeRepository {
+  constructor(private readonly db: Queryable = getPool()) {}
+
+  async status(): Promise<{
+    paused: boolean;
+    executionMode: ExecutionMode;
+    approveThreshold: number;
+    testnetConfigured: boolean;
+    updatedAt?: string;
+  }> {
+    const { rows } = await this.db.query<{
+      paused: boolean;
+      execution_mode: ExecutionMode;
+      approve_threshold: number;
+      updated_at: Date;
+    }>('SELECT paused, execution_mode, approve_threshold, updated_at FROM bot_runtime WHERE id = 1');
+    const row = rows[0];
+    return {
+      paused: row?.paused ?? false,
+      executionMode: row?.execution_mode ?? 'paper',
+      approveThreshold: row?.approve_threshold ?? 7.5,
+      testnetConfigured: false,
+      updatedAt: row ? iso(row.updated_at) : undefined,
+    };
+  }
+
+  async executionMode(): Promise<'paper' | 'testnet'> {
+    const { rows } = await this.db.query<{ execution_mode: ExecutionMode }>(
+      'SELECT execution_mode FROM bot_runtime WHERE id = 1',
+    );
+    const mode = rows[0]?.execution_mode ?? 'paper';
+    return mode === 'testnet' ? 'testnet' : 'paper';
+  }
+
+  async setExecutionMode(mode: 'paper' | 'testnet'): Promise<void> {
+    await this.db.query(
+      'UPDATE bot_runtime SET execution_mode = $1, updated_at = now() WHERE id = 1',
+      [mode],
+    );
+  }
+
+  async syncExecutionMode(mode: ExecutionMode): Promise<void> {
+    if (mode === 'live') return;
+    await this.db.query(
+      'UPDATE bot_runtime SET execution_mode = $1, updated_at = now() WHERE id = 1',
+      [mode === 'testnet' ? 'testnet' : 'paper'],
+    );
+  }
+
+  async pause(): Promise<void> {
+    await this.db.query('UPDATE bot_runtime SET paused = true, updated_at = now() WHERE id = 1');
+  }
+
+  async resume(): Promise<void> {
+    await this.db.query('UPDATE bot_runtime SET paused = false, updated_at = now() WHERE id = 1');
+  }
+
+  async approveThreshold(): Promise<number> {
+    const { rows } = await this.db.query<{ approve_threshold: number }>(
+      'SELECT approve_threshold FROM bot_runtime WHERE id = 1',
+    );
+    return rows[0]?.approve_threshold ?? 7.5;
+  }
+
+  async setApproveThreshold(threshold: number): Promise<void> {
+    await this.db.query(
+      'UPDATE bot_runtime SET approve_threshold = $1, updated_at = now() WHERE id = 1',
+      [threshold],
+    );
+  }
+
+  async syncApproveThreshold(threshold: number): Promise<void> {
+    await this.setApproveThreshold(threshold);
   }
 }
 
@@ -735,6 +1139,8 @@ export interface Repositories {
   memos: MemoRepository;
   review: ReviewQueueRepository;
   portfolio: PortfolioRepository;
+  execution: ExecutionRepository;
+  bot: BotRuntimeRepository;
   newsCache: NewsCacheRepository;
   backtests: BacktestRepository;
 }
@@ -749,6 +1155,8 @@ export function createRepositories(db: Queryable = getPool()): Repositories {
     memos: new MemoRepository(db),
     review: new ReviewQueueRepository(db),
     portfolio: new PortfolioRepository(db),
+    execution: new ExecutionRepository(db),
+    bot: new BotRuntimeRepository(db),
     newsCache: new NewsCacheRepository(db),
     backtests: new BacktestRepository(db),
   };

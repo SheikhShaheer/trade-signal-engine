@@ -1,9 +1,7 @@
 /**
  * @tse/core — the whole engine as a library.
  *
- * Stages 1 → 6 plus persistence and replay. There is deliberately no export
- * here that can place an order: the terminal capability of this package is
- * "write a memo to the human review queue".
+ * Stages 1 → 7 plus persistence, paper execution, and replay.
  */
 
 export * from './types.js';
@@ -11,6 +9,7 @@ export * from './config/index.js';
 export * from './indicators/index.js';
 export * from './logging/logger.js';
 export * from './providers/index.js';
+export * from './execution/index.js';
 
 export { MarketScanner, type ScannerDeps, type NewsCache } from './stages/scanner.js';
 export {
@@ -61,6 +60,8 @@ export {
   MemoRepository,
   ReviewQueueRepository,
   PortfolioRepository,
+  ExecutionRepository,
+  BotRuntimeRepository,
   NewsCacheRepository,
   BacktestRepository,
   type Repositories,

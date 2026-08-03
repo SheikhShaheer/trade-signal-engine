@@ -163,6 +163,9 @@ button:disabled {
 
 .page {
   max-width: 980px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
 }
 
 .page-head {
@@ -170,7 +173,7 @@ button:disabled {
   justify-content: space-between;
   gap: 16px;
   align-items: flex-start;
-  margin-bottom: 16px;
+  margin-bottom: 0;
 }
 
 .page-head h1 {
@@ -195,8 +198,8 @@ button:disabled {
 .metric-row {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 10px;
-  margin-bottom: 16px;
+  gap: 12px;
+  margin-bottom: 0;
 }
 
 .metric {
@@ -225,14 +228,14 @@ button:disabled {
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  padding: 12px;
+  padding: 16px;
 }
 
 .panel-head {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 8px;
+  margin-bottom: 12px;
   padding: 0 4px;
 }
 
@@ -321,8 +324,13 @@ button:disabled {
 }
 
 .pl-pair .loss,
-.text-loss {
+.text-loss,
+.loss-text {
   color: var(--loss);
+}
+
+.profit-text {
+  color: var(--profit);
 }
 
 .score-chip {
@@ -401,7 +409,7 @@ button:disabled {
 }
 
 .banner {
-  margin-bottom: 14px;
+  margin-bottom: 0;
   padding: 10px 12px;
   border-radius: var(--radius);
   border: 1px solid #4a3226;
@@ -734,11 +742,75 @@ button:disabled {
   .metric-row,
   .detail-grid,
   .detail-hero,
-  .pl-board {
+  .pl-board,
+  .positions-layout {
     grid-template-columns: 1fr;
   }
 
   .content {
     padding: 14px;
   }
+}
+
+.chart-wrap {
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: var(--panel);
+}
+
+.chart-levels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 10px 12px;
+  font-size: 13px;
+  border-top: 1px solid var(--line);
+}
+
+.positions-layout {
+  display: grid;
+  grid-template-columns: minmax(220px, 280px) 1fr;
+  gap: 24px;
+  align-items: start;
+}
+
+.positions-list .signal-row.compact {
+  width: 100%;
+  text-align: left;
+  border: none;
+  cursor: pointer;
+  background: transparent;
+}
+
+.positions-list .signal-row.compact.active {
+  background: var(--panel-2);
+  outline: 1px solid var(--accent);
+}
+
+.mode-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.mode-badge.paper {
+  background: rgba(96, 165, 250, 0.15);
+  color: #93c5fd;
+}
+
+.mode-badge.testnet {
+  background: rgba(251, 191, 36, 0.15);
+  color: #fcd34d;
+}
+
+.filter-chip.active {
+  outline: 1px solid var(--accent);
+}
+
+.chart-caption {
+  padding: 0 12px 12px;
 }

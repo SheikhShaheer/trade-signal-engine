@@ -1,5 +1,8 @@
 import type { EngineConfig, InstrumentConfig } from '../config/schema.js';
 import type { Repositories } from '../db/repositories.js';
+import { shouldSkipExecution } from '../execution/cooldown.js';
+import type { PositionMonitor } from '../execution/monitor.js';
+import type { ExecutionProvider } from '../execution/types.js';
 import { silentLogger, type Logger } from '../logging/logger.js';
 import type { MarketDataProvider, NewsProvider } from '../providers/types.js';
 import { SignalDetector } from '../stages/detectors/index.js';
@@ -14,15 +17,17 @@ export interface PipelineDeps {
   repositories: Repositories;
   marketData: MarketDataProvider;
   news: NewsProvider;
+  executor: ExecutionProvider;
+  positionMonitor: PositionMonitor;
   logger?: Logger;
 }
 
 /**
- * Orchestrates stages 1 → 6 and stops at the review queue.
+ * Orchestrates stages 1 → 7: scan, detect, plan, risk-gate, score, then
+ * automatically execute approved memos in paper mode.
  *
- * The pipeline's terminal action is `review.enqueue`. Nothing downstream of it
- * exists: there is no execution stage, no order client and no code path from a
- * memo to a broker. A human reading the queue is the only way anything happens.
+ * The pipeline's terminal action for approved memos is `executor.submitEntry`.
+ * Watchlist memos are recorded for observation only; rejected memos are dropped.
  */
 export class Pipeline {
   private readonly config: EngineConfig;
@@ -73,18 +78,26 @@ export class Pipeline {
       queuedForReview: 0,
       supersededDuplicates: 0,
       suppressedDuplicates: 0,
+      executed: 0,
+      executionSkipped: 0,
+      positionsClosed: 0,
+      executionErrors: 0,
       drops: [],
       errors: [],
     };
 
     try {
-      const expired = await repos.review.expireStale();
-      if (expired > 0) logger.info('expired stale review items', { count: expired });
+      const monitorResult = await this.deps.positionMonitor.run();
+      stats.positionsClosed = monitorResult.closed;
+      for (const err of monitorResult.errors) stats.errors.push(err);
 
-      // Read once per run so every instrument is gated against the same
-      // portfolio state; re-reading mid-run could let two plans each pass a
-      // limit that they jointly breach.
-      const portfolio = await repos.portfolio.current(this.config.account.startingEquity);
+      const expired = await repos.review.expireStale();
+      if (expired > 0) logger.info('expired stale watchlist items', { count: expired });
+
+      const approveThreshold = await repos.bot.approveThreshold();
+      this.scorer.setApproveThreshold(approveThreshold);
+
+      let portfolio = await repos.portfolio.current(this.config.account.startingEquity);
       logger.info('portfolio state loaded', {
         equity: portfolio.equity,
         peakEquity: portfolio.peakEquity,
@@ -101,7 +114,7 @@ export class Pipeline {
 
       for (const snapshot of snapshots) {
         try {
-          await this.processSnapshot(snapshot, portfolio, runId, stats, logger);
+          portfolio = await this.processSnapshot(snapshot, portfolio, runId, stats, logger);
         } catch (error) {
           const message = (error as Error).message;
           stats.errors.push(`${snapshot.instrument}: ${message}`);
@@ -128,9 +141,9 @@ export class Pipeline {
       approved: stats.approved,
       watchlist: stats.watchlist,
       rejected: stats.rejected,
-      queued: stats.queuedForReview,
-      superseded: stats.supersededDuplicates,
-      suppressed: stats.suppressedDuplicates,
+      executed: stats.executed,
+      skipped: stats.executionSkipped,
+      closed: stats.positionsClosed,
       errors: stats.errors.length,
     });
 
@@ -138,8 +151,7 @@ export class Pipeline {
   }
 
   /**
-   * Stages 2 → 6 for one instrument. Every early return is recorded as a drop
-   * with a reason, so "nothing happened" is always explainable.
+   * Stages 2 → 7 for one instrument. Returns updated portfolio when a trade opens.
    */
   private async processSnapshot(
     snapshot: MarketSnapshot,
@@ -147,7 +159,7 @@ export class Pipeline {
     runId: number,
     stats: PipelineRunStats,
     logger: Logger,
-  ): Promise<void> {
+  ): Promise<PortfolioState> {
     const repos = this.deps.repositories;
     const instrument = this.findInstrument(snapshot.instrument);
 
@@ -155,7 +167,6 @@ export class Pipeline {
     stats.snapshotsStored += 1;
     const stored: MarketSnapshot = { ...snapshot, id: snapshotId };
 
-    // Stage 2
     const candidate = this.detector.detect(stored);
     if (!candidate) {
       const results = this.detector.runDetectors(stored);
@@ -164,14 +175,13 @@ export class Pipeline {
         .join(', ')}`;
       stats.drops.push({ instrument: snapshot.instrument, stage: 'detector', reason });
       logger.debug('no signal', { instrument: snapshot.instrument });
-      return;
+      return portfolio;
     }
 
     const signalId = await repos.signals.insert(candidate, snapshotId, runId);
     stats.signalsDetected += 1;
     const storedCandidate = { ...candidate, id: signalId, snapshotId };
 
-    // Stage 3
     const planResult = this.planner.build(storedCandidate, stored, instrument);
     if (!planResult.ok) {
       stats.drops.push({ instrument: snapshot.instrument, stage: 'planner', reason: planResult.rejection.reason });
@@ -179,22 +189,19 @@ export class Pipeline {
         instrument: snapshot.instrument,
         reason: planResult.rejection.reason,
       });
-      return;
+      return portfolio;
     }
 
     const planId = await repos.plans.insert(planResult.plan, signalId, runId);
     stats.plansBuilt += 1;
     const plan = { ...planResult.plan, id: planId, signalId };
 
-    // Stage 4 — audit rows are written whether or not the plan passes.
     const riskGate = this.riskGate.evaluate(plan, stored, instrument, portfolio);
     await repos.riskGate.insert(riskGate, planId, runId);
 
     if (riskGate.overallPass) stats.riskGatePassed += 1;
     else stats.riskGateBlocked += 1;
 
-    // Stage 6 — a memo is written for blocked plans too, so the rejected list
-    // stays available for backtesting the rubric.
     const memo = this.scorer.buildMemo({ candidate: storedCandidate, plan, riskGate, snapshot: stored });
     const memoId = await repos.memos.insert(memo, planId, runId);
     stats.memosCreated += 1;
@@ -211,48 +218,102 @@ export class Pipeline {
         memoId,
         reason: summariseFailures(riskGate),
       });
-      return;
+      return portfolio;
     }
 
-    // Stage 5 — the only terminal action in the pipeline.
     if (memo.decision === 'rejected') {
       stats.drops.push({
         instrument: snapshot.instrument,
         stage: 'scoring',
         reason: `score ${memo.score.toFixed(2)} is below the ${this.config.scoring.thresholds.watchlist} watchlist cutoff`,
       });
-      return;
+      return portfolio;
     }
 
-    const outcome = await repos.review.enqueue(memoId, this.config.review.pendingTtlMinutes, {
-      supersedePendingDuplicates: this.config.review.supersedePendingDuplicates,
-      duplicateCooldownMinutes: this.config.review.duplicateCooldownMinutes,
-    });
-
-    if (outcome === 'suppressed') {
-      stats.suppressedDuplicates += 1;
-      logger.info('memo suppressed; this idea was decided on recently', {
+    if (memo.decision === 'watchlist') {
+      logger.info('watchlist memo recorded; bot does not trade below approval threshold', {
         instrument: snapshot.instrument,
         memoId,
-        decision: memo.decision,
         score: memo.score,
       });
-      return;
+      return portfolio;
     }
 
-    stats.queuedForReview += 1;
-    if (outcome === 'superseded') stats.supersededDuplicates += 1;
-    logger.info(
-      outcome === 'superseded'
-        ? 'memo queued for human review, replacing an older one for the same idea'
-        : 'memo queued for human review',
-      {
-        instrument: snapshot.instrument,
-        memoId,
-        decision: memo.decision,
-        score: memo.score,
-      },
-    );
+    // Stage 7 — approved memos are executed automatically.
+    return this.tryExecute(memo, memoId, plan, instrument, snapshot.price, portfolio, stats, logger);
+  }
+
+  private async tryExecute(
+    memo: DecisionMemo,
+    memoId: number,
+    plan: DecisionMemo['tradePlan'],
+    instrument: InstrumentConfig,
+    lastPrice: number,
+    portfolio: PortfolioState,
+    stats: PipelineRunStats,
+    logger: Logger,
+  ): Promise<PortfolioState> {
+    const repos = this.deps.repositories;
+    if (memo.decision !== 'approved') {
+      return portfolio;
+    }
+
+    const { autoDecisions } = this.config.execution;
+    if (!autoDecisions.includes('approved')) {
+      stats.executionSkipped += 1;
+      return portfolio;
+    }
+
+    const paused = await repos.bot.status();
+    if (paused.paused) {
+      stats.executionSkipped += 1;
+      await repos.execution.logEvent({ memoId, eventType: 'paused', detail: 'kill switch active' });
+      logger.info('execution skipped; bot paused', { instrument: memo.instrument, memoId });
+      return portfolio;
+    }
+
+    const cooldown = await shouldSkipExecution(repos, {
+      instrument: memo.instrument,
+      direction: memo.direction,
+      duplicateCooldownMinutes: this.config.review.duplicateCooldownMinutes,
+    });
+    if (cooldown.skip) {
+      stats.executionSkipped += 1;
+      await repos.execution.logEvent({ memoId, eventType: 'skipped', detail: cooldown.reason });
+      logger.info('execution skipped', { instrument: memo.instrument, memoId, reason: cooldown.reason });
+      return portfolio;
+    }
+
+    const storedMemo = { ...memo, id: memoId };
+    const result = await this.deps.executor.submitEntry({
+      memo: storedMemo,
+      memoId,
+      plan,
+      sizing: memo.riskGateResult.sizing,
+      instrument,
+      lastPrice,
+    });
+
+    if (!result.ok) {
+      stats.executionSkipped += 1;
+      if (result.reason !== `duplicate open position on ${memo.instrument}`) {
+        await repos.execution.logEvent({ memoId, eventType: 'skipped', detail: result.reason });
+      }
+      logger.info('execution skipped', { instrument: memo.instrument, memoId, reason: result.reason });
+      return portfolio;
+    }
+
+    stats.executed += 1;
+    logger.info('paper trade opened', {
+      instrument: memo.instrument,
+      memoId,
+      orderId: result.orderId,
+      positionId: result.positionId,
+      fillPrice: result.fillPrice,
+      quantity: result.quantity,
+    });
+
+    return repos.portfolio.current(this.config.account.startingEquity);
   }
 
   private findInstrument(symbol: string): InstrumentConfig {
@@ -261,10 +322,6 @@ export class Pipeline {
     return instrument;
   }
 
-  /**
-   * Stages 2 → 6 without persistence, for tests and replay. Returns the memo
-   * that would have been produced, or the reason it stopped short.
-   */
   evaluateSnapshot(
     snapshot: MarketSnapshot,
     portfolio: PortfolioState,

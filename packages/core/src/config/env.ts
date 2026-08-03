@@ -29,6 +29,10 @@ function loadEnvFile(): void {
 const envSchema = z.object({
   DATABASE_URL: z.string().default('postgres://tse:tse@localhost:5433/tse'),
   BINANCE_BASE_URL: z.string().url().default('https://api.binance.com'),
+  BINANCE_TESTNET_BASE_URL: z.string().url().default('https://testnet.binance.vision'),
+  BINANCE_TESTNET_API_KEY: z.string().optional(),
+  BINANCE_TESTNET_API_SECRET: z.string().optional(),
+  EXECUTION_MODE: z.enum(['paper', 'testnet', 'live']).default('paper'),
   NEWS_PROVIDER: z.enum(['stub', 'cryptopanic']).default('stub'),
   CRYPTOPANIC_API_KEY: z.string().optional(),
   API_PORT: z.coerce.number().int().positive().default(4000),
@@ -51,6 +55,11 @@ export function getEnv(): Env {
   }
   if (parsed.data.NEWS_PROVIDER === 'cryptopanic' && !parsed.data.CRYPTOPANIC_API_KEY) {
     throw new Error('NEWS_PROVIDER=cryptopanic requires CRYPTOPANIC_API_KEY to be set');
+  }
+  if (parsed.data.EXECUTION_MODE === 'testnet') {
+    if (!parsed.data.BINANCE_TESTNET_API_KEY || !parsed.data.BINANCE_TESTNET_API_SECRET) {
+      throw new Error('EXECUTION_MODE=testnet requires BINANCE_TESTNET_API_KEY and BINANCE_TESTNET_API_SECRET');
+    }
   }
   cached = parsed.data;
   return cached;

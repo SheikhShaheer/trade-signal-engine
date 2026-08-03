@@ -1,4 +1,5 @@
 import { defaultConfig } from './default.js';
+import { getEnv } from './env.js';
 import { engineConfigSchema, type EngineConfig } from './schema.js';
 
 export * from './schema.js';
@@ -45,6 +46,26 @@ export function loadConfig(overrides?: DeepPartial<EngineConfig>): EngineConfig 
   assertCoherent(parsed.data);
   if (!overrides) cached = parsed.data;
   return parsed.data;
+}
+
+/** Load config with deployment overrides from environment. */
+export function loadConfigFromEnv(overrides?: DeepPartial<EngineConfig>): EngineConfig {
+  const env = getEnv();
+  const envOverrides: DeepPartial<EngineConfig> = {
+    execution: { mode: env.EXECUTION_MODE },
+  };
+  const mergedOverrides = overrides ? mergeDeep(envOverrides, overrides) : envOverrides;
+  return loadConfig(mergedOverrides);
+}
+
+export function getTestnetCredentials(): { apiKey: string; apiSecret: string; baseUrl: string } | undefined {
+  const env = getEnv();
+  if (!env.BINANCE_TESTNET_API_KEY || !env.BINANCE_TESTNET_API_SECRET) return undefined;
+  return {
+    apiKey: env.BINANCE_TESTNET_API_KEY,
+    apiSecret: env.BINANCE_TESTNET_API_SECRET,
+    baseUrl: env.BINANCE_TESTNET_BASE_URL,
+  };
 }
 
 /**

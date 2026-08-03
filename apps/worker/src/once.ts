@@ -16,16 +16,16 @@ async function main(): Promise<void> {
   out.write(`risk gate blocked: ${stats.riskGateBlocked}\n`);
   out.write(`memos:             ${stats.memosCreated} (approved ${stats.approved}, watchlist ${stats.watchlist}, rejected ${stats.rejected})\n`);
   out.write(
-    `queued for review: ${stats.queuedForReview}` +
-      (stats.supersededDuplicates > 0 ? ` (${stats.supersededDuplicates} replaced an older memo)` : '') +
+    `executed:          ${stats.executed}` +
+      (stats.executionSkipped > 0 ? ` (${stats.executionSkipped} skipped)` : '') +
       '\n',
   );
-  if (stats.suppressedDuplicates > 0) {
-    out.write(`suppressed:        ${stats.suppressedDuplicates} (same idea decided on recently)\n`);
+  if (stats.positionsClosed > 0) {
+    out.write(`positions closed:  ${stats.positionsClosed}\n`);
   }
 
   if (stats.drops.length > 0) {
-    out.write('\nWhy instruments did not reach the queue\n');
+    out.write('\nWhy instruments did not trade\n');
     for (const drop of stats.drops) {
       out.write(`  ${drop.instrument.padEnd(10)} [${drop.stage}] ${drop.reason}\n`);
     }
@@ -45,7 +45,7 @@ async function main(): Promise<void> {
           `stop ${memo.tradePlan.stopLoss} tp1 ${memo.tradePlan.targets[0]} R:R ${memo.tradePlan.riskRewardRatio}\n`,
       );
     }
-    out.write('\nOpen the dashboard to review these. Nothing is acted on until a human acknowledges it.\n');
+    out.write('\nPaper bot trades approved memos automatically. See dashboard → Trades.\n');
   } else {
     out.write('\nNo memos yet. This is normal on a quiet market or a first run.\n');
   }

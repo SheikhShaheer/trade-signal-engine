@@ -14,6 +14,21 @@ export function formatMoney(value: number): string {
   return `$${value.toFixed(2)}`;
 }
 
+export function formatPnl(value: number): string {
+  const prefix = value >= 0 ? '+' : '−';
+  return `${prefix}${formatMoney(Math.abs(value))}`;
+}
+
+export function unrealisedPnl(
+  direction: Direction,
+  entryPrice: number,
+  markPrice: number,
+  quantity: number,
+): number {
+  const diff = direction === 'long' ? markPrice - entryPrice : entryPrice - markPrice;
+  return diff * quantity;
+}
+
 export function directionLabel(direction: Direction): string {
   return direction === 'long' ? 'Long · price up' : 'Short · price down';
 }
