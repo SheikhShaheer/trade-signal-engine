@@ -13,6 +13,8 @@ export default function SettingsPage() {
   const [equityInput, setEquityInput] = useState('10');
   const [executionMode, setExecutionMode] = useState<'paper' | 'testnet'>('paper');
   const [approveThreshold, setApproveThreshold] = useState('7.5');
+  const [signalTimeframe, setSignalTimeframe] = useState('4h');
+  const [chartTimeframes, setChartTimeframes] = useState<string[]>(['15m', '1h', '4h', '1d']);
   const [watchlistThreshold, setWatchlistThreshold] = useState(5);
   const [saving, setSaving] = useState(false);
   const [toggling, setToggling] = useState(false);
@@ -30,6 +32,8 @@ export default function SettingsPage() {
       setBot(botStatus);
       setExecutionMode(botStatus.mode === 'testnet' ? 'testnet' : 'paper');
       setApproveThreshold(String(botStatus.approveThreshold ?? cfg.scoring.thresholds.approve));
+      setSignalTimeframe(botStatus.signalTimeframe ?? cfg.signalTimeframe ?? '4h');
+      setChartTimeframes(cfg.chartTimeframes ?? ['15m', '1h', '4h', '1d']);
       setWatchlistThreshold(cfg.scoring.thresholds.watchlist);
       setSlippageBps(cfg.execution.slippageBps);
       setFeeBps(cfg.execution.feeBps);
@@ -94,6 +98,22 @@ export default function SettingsPage() {
     }
   };
 
+  const saveSignalTimeframe = async (timeframe: string) => {
+    setSaving(true);
+    setMessage(null);
+    setError(null);
+    try {
+      await api.setSignalTimeframe(timeframe);
+      setSignalTimeframe(timeframe);
+      setMessage(`Signal timeframe set to ${timeframe}. Bot and charts update on the next scan.`);
+      await load();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Could not save signal timeframe.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const toggleBot = async () => {
     if (!bot) return;
     setToggling(true);
@@ -118,6 +138,29 @@ export default function SettingsPage() {
           <p>Account size, execution mode, and bot controls.</p>
         </div>
       </div>
+
+      <section className="panel settings-panel">
+        <h2>Signal timeframe</h2>
+        <p className="muted">
+          Candle size for detecting signals, building plans, and chart display. Lower = faster, noisier setups.
+        </p>
+        <p>
+          Active: <strong>{signalTimeframe}</strong>
+        </p>
+        <div className="preset-row">
+          {chartTimeframes.map((tf) => (
+            <button
+              key={tf}
+              type="button"
+              className={signalTimeframe === tf ? 'filter-chip active' : 'filter-chip'}
+              disabled={saving}
+              onClick={() => void saveSignalTimeframe(tf)}
+            >
+              {tf}
+            </button>
+          ))}
+        </div>
+      </section>
 
       <section className="panel settings-panel">
         <h2>Trade acceptance</h2>

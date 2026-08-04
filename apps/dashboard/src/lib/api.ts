@@ -62,10 +62,19 @@ export const api = {
       body: JSON.stringify({ threshold }),
     }),
 
+  setSignalTimeframe: (timeframe: string) =>
+    request<{ ok: true; timeframe: string }>('/api/bot/signal-timeframe', {
+      method: 'PUT',
+      body: JSON.stringify({ timeframe }),
+    }),
+
   config: () =>
     request<{
       execution: { mode: string; slippageBps: number; feeBps: number };
       scoring: { thresholds: { approve: number; watchlist: number } };
+      signalTimeframe: string;
+      chartTimeframes: string[];
+      volatility: { atrTimeframe: string };
     }>('/api/config'),
 
   trades: (limit = 50) => request<{ trades: TradeRecord[]; count: number }>(`/api/trades?limit=${limit}`),

@@ -168,6 +168,10 @@ button:disabled {
   gap: 24px;
 }
 
+.page-wide {
+  max-width: 1280px;
+}
+
 .page-head {
   display: flex;
   justify-content: space-between;
@@ -222,6 +226,13 @@ button:disabled {
   margin-top: 4px;
   font-size: 22px;
   font-variant-numeric: tabular-nums;
+}
+
+.metric-sub {
+  display: block;
+  margin-top: 4px;
+  font-size: 11px;
+  font-weight: 500;
 }
 
 .panel {
@@ -756,6 +767,22 @@ button:disabled {
   border-radius: var(--radius);
   overflow: hidden;
   background: var(--panel);
+  width: 100%;
+}
+
+.chart-wrap .tradingview-widget-container,
+.chart-wrap .tradingview-widget-container__widget,
+.chart-wrap .tradingview-widget-container iframe {
+  display: block;
+  width: 100% !important;
+}
+
+.chart-wrap-large .tradingview-widget-container iframe {
+  min-height: 720px;
+}
+
+.chart-panel {
+  padding: 16px 16px 12px;
 }
 
 .chart-levels {
@@ -769,9 +796,13 @@ button:disabled {
 
 .positions-layout {
   display: grid;
-  grid-template-columns: minmax(220px, 280px) 1fr;
+  grid-template-columns: minmax(220px, 260px) minmax(0, 1fr);
   gap: 24px;
   align-items: start;
+}
+
+.positions-chart {
+  min-width: 0;
 }
 
 .positions-list .signal-row.compact {

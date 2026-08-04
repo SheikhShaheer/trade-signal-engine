@@ -6,6 +6,7 @@ import { TradingViewChart } from '@/components/TradingViewChart';
 import { SignalRow } from '@/components/SignalRow';
 import { api, API_BASE_URL } from '@/lib/api';
 import { formatMoney, formatPnl } from '@/lib/format';
+import { timeframeToChartInterval } from '@/lib/symbols';
 import type { BotStatus, Memo, OpenPosition, Stats, TradeRecord } from '@/lib/types';
 
 function primaryPosition(positions: OpenPosition[]): OpenPosition | undefined {
@@ -41,7 +42,7 @@ export default function BotHomePage() {
 
   useEffect(() => {
     void load();
-    const timer = setInterval(() => void load(), 30_000);
+    const timer = setInterval(() => void load(), 15_000);
     return () => clearInterval(timer);
   }, [load]);
 
@@ -73,7 +74,7 @@ export default function BotHomePage() {
     bot?.mode === 'testnet' ? 'Testnet' : bot?.mode === 'paper' ? 'Paper' : bot?.mode ?? '—';
 
   return (
-    <div className="page">
+    <div className="page page-wide">
       <div className="page-head">
         <div>
           <h1>Trading bot</h1>
@@ -106,13 +107,18 @@ export default function BotHomePage() {
         </div>
         <div className="metric">
           <span>Equity</span>
-          <strong>{bot ? formatMoney(bot.equity) : '—'}</strong>
+          <strong>{bot ? formatMoney(bot.markEquity ?? bot.equity) : '—'}</strong>
         </div>
         <div className="metric">
           <span>Today P/L</span>
-          <strong className={bot && bot.dayRealisedPnl >= 0 ? 'profit-text' : 'loss-text'}>
-            {bot ? formatPnl(bot.dayRealisedPnl) : '—'}
+          <strong className={bot && (bot.totalPnl ?? bot.dayRealisedPnl) >= 0 ? 'profit-text' : 'loss-text'}>
+            {bot ? formatPnl(bot.totalPnl ?? bot.dayRealisedPnl) : '—'}
           </strong>
+          {bot && bot.unrealisedPnl !== undefined && bot.unrealisedPnl !== 0 && (
+            <span className="metric-sub muted">
+              {formatPnl(bot.unrealisedPnl)} open · {formatPnl(bot.dayRealisedPnl)} realised
+            </span>
+          )}
         </div>
         <div className="metric">
           <span>Open positions</span>
@@ -129,7 +135,7 @@ export default function BotHomePage() {
       </div>
 
       {featured && (
-        <section className="panel">
+        <section className="panel chart-panel">
           <div className="panel-head">
             <h2>
               {featured.instrument}{' '}
@@ -141,10 +147,11 @@ export default function BotHomePage() {
           </div>
           <TradingViewChart
             symbol={featured.instrument}
+            interval={timeframeToChartInterval(bot?.signalTimeframe ?? '4h')}
             entry={featured.entryPrice}
             stop={featured.stopLoss}
             target={featured.takeProfit}
-            height={580}
+            large
           />
         </section>
       )}

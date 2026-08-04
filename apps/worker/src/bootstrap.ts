@@ -58,6 +58,7 @@ export async function bootstrap(component: string): Promise<Bootstrapped> {
   const repositories = createRepositories();
   await repositories.bot.syncExecutionMode(config.execution.mode);
   await repositories.bot.syncApproveThreshold(config.scoring.thresholds.approve);
+  await repositories.bot.syncSignalTimeframe(config.volatility.atrTimeframe);
 
   const marketData = createMarketDataProvider(env, config.data);
   const news = createNewsProvider(env, config.data);

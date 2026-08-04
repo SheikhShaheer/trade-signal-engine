@@ -1,4 +1,5 @@
 import type { EngineConfig, InstrumentConfig } from '../config/schema.js';
+import { withSignalTimeframe } from '../config/runtime.js';
 import type { Repositories } from '../db/repositories.js';
 import { shouldSkipExecution } from '../execution/cooldown.js';
 import type { PositionMonitor } from '../execution/monitor.js';
@@ -32,26 +33,37 @@ export interface PipelineDeps {
 export class Pipeline {
   private readonly config: EngineConfig;
   private readonly logger: Logger;
-  private readonly scanner: MarketScanner;
-  private readonly detector: SignalDetector;
-  private readonly planner: TradePlanBuilder;
-  private readonly riskGate: RiskGate;
+  private scanner: MarketScanner;
+  private detector: SignalDetector;
+  private planner: TradePlanBuilder;
+  private riskGate: RiskGate;
   private readonly scorer: DecisionScorer;
 
   constructor(private readonly deps: PipelineDeps) {
     this.config = deps.config;
     this.logger = (deps.logger ?? silentLogger).child({ component: 'pipeline' });
-    this.scanner = new MarketScanner({
-      config: deps.config,
-      marketData: deps.marketData,
-      news: deps.news,
-      newsCache: deps.repositories.newsCache,
-      logger: deps.logger,
-    });
+    this.scanner = this.createScanner(deps.config);
     this.detector = new SignalDetector(deps.config);
     this.planner = new TradePlanBuilder(deps.config);
     this.riskGate = new RiskGate(deps.config);
     this.scorer = new DecisionScorer(deps.config);
+  }
+
+  private createScanner(config: EngineConfig): MarketScanner {
+    return new MarketScanner({
+      config,
+      marketData: this.deps.marketData,
+      news: this.deps.news,
+      newsCache: this.deps.repositories.newsCache,
+      logger: this.deps.logger,
+    });
+  }
+
+  private applyRunConfig(config: EngineConfig): void {
+    this.scanner = this.createScanner(config);
+    this.detector = new SignalDetector(config);
+    this.planner = new TradePlanBuilder(config);
+    this.riskGate = new RiskGate(config);
   }
 
   async run(mode: 'live' | 'once' = 'live'): Promise<PipelineRunStats> {
@@ -96,6 +108,10 @@ export class Pipeline {
 
       const approveThreshold = await repos.bot.approveThreshold();
       this.scorer.setApproveThreshold(approveThreshold);
+
+      const signalTimeframe = await repos.bot.signalTimeframe();
+      this.applyRunConfig(withSignalTimeframe(this.config, signalTimeframe));
+      logger.info('runtime settings loaded', { approveThreshold, signalTimeframe });
 
       let portfolio = await repos.portfolio.current(this.config.account.startingEquity);
       logger.info('portfolio state loaded', {

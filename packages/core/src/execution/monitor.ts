@@ -1,10 +1,10 @@
-import type { EngineConfig } from '../config/schema.js';
+import type { EngineConfig, InstrumentConfig } from '../config/schema.js';
 import type { Repositories } from '../db/repositories.js';
 import { silentLogger, type Logger } from '../logging/logger.js';
 import type { MarketDataProvider } from '../providers/types.js';
 import type { OpenPosition } from '../types.js';
 import type { ExecutionProvider } from './types.js';
-import { isStopHit, isTakeProfitHit } from './types.js';
+import { isStopHit, isTakeProfitHit, unrealisedPnl } from './types.js';
 
 export interface PositionMonitorDeps {
   config: EngineConfig;
@@ -16,11 +16,12 @@ export interface PositionMonitorDeps {
 
 export interface MonitorResult {
   closed: number;
+  marked: number;
   errors: string[];
 }
 
 /**
- * Checks open bot positions each pipeline tick and closes on stop or first target.
+ * Checks open bot positions each pipeline tick, marks unrealised P/L, and closes on stop or first target.
  */
 export class PositionMonitor {
   private readonly logger: Logger;
@@ -31,12 +32,13 @@ export class PositionMonitor {
 
   async run(): Promise<MonitorResult> {
     const positions = await this.deps.repositories.portfolio.openBotPositions();
-    const result: MonitorResult = { closed: 0, errors: [] };
+    const result: MonitorResult = { closed: 0, marked: 0, errors: [] };
 
     for (const position of positions) {
       try {
-        const closed = await this.checkPosition(position);
-        if (closed) result.closed += 1;
+        const outcome = await this.processPosition(position);
+        if (outcome === 'closed') result.closed += 1;
+        else if (outcome === 'marked') result.marked += 1;
       } catch (error) {
         const message = (error as Error).message;
         result.errors.push(`${position.instrument}: ${message}`);
@@ -47,40 +49,43 @@ export class PositionMonitor {
     return result;
   }
 
-  private async checkPosition(position: OpenPosition): Promise<boolean> {
-    if (position.id === undefined) return false;
-    const takeProfit = position.takeProfit;
-    if (takeProfit === undefined) return false;
+  private async processPosition(position: OpenPosition): Promise<'closed' | 'marked' | 'skipped'> {
+    if (position.id === undefined) return 'skipped';
 
     const price = await this.deps.marketData.getLastPrice(position.instrument);
+    const takeProfit = position.takeProfit;
 
     let reason: 'sl_hit' | 'tp_hit' | undefined;
     if (isStopHit(position.direction, price, position.stopLoss)) {
       reason = 'sl_hit';
-    } else if (isTakeProfitHit(position.direction, price, takeProfit)) {
+    } else if (takeProfit !== undefined && isTakeProfitHit(position.direction, price, takeProfit)) {
       reason = 'tp_hit';
     }
 
-    if (!reason) return false;
+    if (reason) {
+      await this.deps.executor.closePosition({
+        positionId: position.id,
+        instrument: position.instrument,
+        direction: position.direction,
+        quantity: position.quantity,
+        entryPrice: position.entryPrice,
+        exitPrice: price,
+        orderId: position.orderId,
+        memoId: position.memoId,
+        reason,
+      });
 
-    await this.deps.executor.closePosition({
-      positionId: position.id,
-      instrument: position.instrument,
-      direction: position.direction,
-      quantity: position.quantity,
-      entryPrice: position.entryPrice,
-      exitPrice: price,
-      orderId: position.orderId,
-      memoId: position.memoId,
-      reason,
-    });
+      this.logger.info('position closed', {
+        instrument: position.instrument,
+        direction: position.direction,
+        reason,
+        price,
+      });
+      return 'closed';
+    }
 
-    this.logger.info('position closed', {
-      instrument: position.instrument,
-      direction: position.direction,
-      reason,
-      price,
-    });
-    return true;
+    const pnl = unrealisedPnl(position.direction, position.entryPrice, price, position.quantity);
+    await this.deps.repositories.portfolio.updatePositionMark(position.id, price, pnl);
+    return 'marked';
   }
 }

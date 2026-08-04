@@ -5,6 +5,7 @@ import { engineConfigSchema, type EngineConfig } from './schema.js';
 export * from './schema.js';
 export { defaultConfig } from './default.js';
 export { getEnv, type Env } from './env.js';
+export { withSignalTimeframe } from './runtime.js';
 
 type DeepPartial<T> = T extends (infer U)[]
   ? U[]

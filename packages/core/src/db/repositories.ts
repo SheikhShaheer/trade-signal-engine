@@ -1,3 +1,4 @@
+import type { Timeframe } from '../config/schema.js';
 import type {
   DecisionMemo,
   Decision,
@@ -655,6 +656,8 @@ export class PortfolioRepository {
       memo_id: number | null;
       order_id: number | null;
       source: string;
+      mark_price: number | null;
+      unrealised_pnl: number | null;
     }>('SELECT * FROM open_positions WHERE closed_at IS NULL ORDER BY opened_at DESC');
     return rows.map((r) => ({
       id: r.id,
@@ -670,7 +673,16 @@ export class PortfolioRepository {
       memoId: r.memo_id ?? undefined,
       orderId: r.order_id ?? undefined,
       source: r.source === 'manual' ? 'manual' : 'bot',
+      markPrice: r.mark_price ?? undefined,
+      unrealisedPnl: r.unrealised_pnl ?? undefined,
     }));
+  }
+
+  async updatePositionMark(positionId: number, markPrice: number, unrealisedPnl: number): Promise<void> {
+    await this.db.query(
+      'UPDATE open_positions SET mark_price = $1, unrealised_pnl = $2 WHERE id = $3',
+      [markPrice, unrealisedPnl, positionId],
+    );
   }
 
   async openBotPositions(): Promise<OpenPosition[]> {
@@ -979,6 +991,7 @@ export class BotRuntimeRepository {
     paused: boolean;
     executionMode: ExecutionMode;
     approveThreshold: number;
+    signalTimeframe: Timeframe;
     testnetConfigured: boolean;
     updatedAt?: string;
   }> {
@@ -986,13 +999,15 @@ export class BotRuntimeRepository {
       paused: boolean;
       execution_mode: ExecutionMode;
       approve_threshold: number;
+      signal_timeframe: Timeframe;
       updated_at: Date;
-    }>('SELECT paused, execution_mode, approve_threshold, updated_at FROM bot_runtime WHERE id = 1');
+    }>('SELECT paused, execution_mode, approve_threshold, signal_timeframe, updated_at FROM bot_runtime WHERE id = 1');
     const row = rows[0];
     return {
       paused: row?.paused ?? false,
       executionMode: row?.execution_mode ?? 'paper',
       approveThreshold: row?.approve_threshold ?? 7.5,
+      signalTimeframe: row?.signal_timeframe ?? '4h',
       testnetConfigured: false,
       updatedAt: row ? iso(row.updated_at) : undefined,
     };
@@ -1045,6 +1060,24 @@ export class BotRuntimeRepository {
 
   async syncApproveThreshold(threshold: number): Promise<void> {
     await this.setApproveThreshold(threshold);
+  }
+
+  async signalTimeframe(): Promise<Timeframe> {
+    const { rows } = await this.db.query<{ signal_timeframe: Timeframe }>(
+      'SELECT signal_timeframe FROM bot_runtime WHERE id = 1',
+    );
+    return rows[0]?.signal_timeframe ?? '4h';
+  }
+
+  async setSignalTimeframe(timeframe: Timeframe): Promise<void> {
+    await this.db.query(
+      'UPDATE bot_runtime SET signal_timeframe = $1, updated_at = now() WHERE id = 1',
+      [timeframe],
+    );
+  }
+
+  async syncSignalTimeframe(timeframe: Timeframe): Promise<void> {
+    await this.setSignalTimeframe(timeframe);
   }
 }
 

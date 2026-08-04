@@ -33,9 +33,12 @@ export interface FakeRepoState {
     stopLoss: number;
     takeProfit?: number;
     closed: boolean;
+    markPrice?: number;
+    unrealisedPnl?: number;
   }[];
   paused: boolean;
   approveThreshold: number;
+  signalTimeframe: string;
   events: string[];
   equity: number;
   dayPnl: number;
@@ -56,6 +59,7 @@ export function makeFakeRepositories(): { repositories: Repositories; state: Fak
     positions: [],
     paused: false,
     approveThreshold: 7.5,
+    signalTimeframe: '4h',
     events: [],
     equity: 10_000,
     dayPnl: 0,
@@ -150,6 +154,8 @@ export function makeFakeRepositories(): { repositories: Repositories; state: Fak
             notional: p.entryPrice * p.quantity,
             openedAt: new Date().toISOString(),
             source: 'bot' as const,
+            markPrice: p.markPrice,
+            unrealisedPnl: p.unrealisedPnl,
           })),
       }),
       openPositions: async () => [],
@@ -168,7 +174,16 @@ export function makeFakeRepositories(): { repositories: Repositories; state: Fak
             notional: p.entryPrice * p.quantity,
             openedAt: new Date().toISOString(),
             source: 'bot' as const,
+            markPrice: p.markPrice,
+            unrealisedPnl: p.unrealisedPnl,
           })),
+      updatePositionMark: async (positionId: number, markPrice: number, unrealisedPnl: number) => {
+        const pos = state.positions.find((p) => p.id === positionId);
+        if (pos) {
+          pos.markPrice = markPrice;
+          pos.unrealisedPnl = unrealisedPnl;
+        }
+      },
       recordState: async (equity: number, _peak: number, dayPnl: number) => {
         state.equity = equity;
         state.dayPnl = dayPnl;
@@ -241,6 +256,7 @@ export function makeFakeRepositories(): { repositories: Repositories; state: Fak
         paused: state.paused,
         executionMode: 'paper' as const,
         approveThreshold: state.approveThreshold,
+        signalTimeframe: state.signalTimeframe,
       }),
       executionMode: async () => 'paper' as const,
       approveThreshold: async () => state.approveThreshold,
@@ -249,6 +265,13 @@ export function makeFakeRepositories(): { repositories: Repositories; state: Fak
       },
       syncApproveThreshold: async (threshold: number) => {
         state.approveThreshold = threshold;
+      },
+      signalTimeframe: async () => state.signalTimeframe as '4h',
+      setSignalTimeframe: async (timeframe: string) => {
+        state.signalTimeframe = timeframe;
+      },
+      syncSignalTimeframe: async (timeframe: string) => {
+        state.signalTimeframe = timeframe;
       },
       setExecutionMode: async () => {},
       syncExecutionMode: async () => {},
@@ -274,7 +297,7 @@ export function makeFakeRepositories(): { repositories: Repositories; state: Fak
 }
 
 export function makeFakePositionMonitor(): PositionMonitor {
-  return { run: async () => ({ closed: 0, errors: [] }) } as unknown as PositionMonitor;
+  return { run: async () => ({ closed: 0, marked: 0, errors: [] }) } as unknown as PositionMonitor;
 }
 
 export function makeTestPipelineDeps(

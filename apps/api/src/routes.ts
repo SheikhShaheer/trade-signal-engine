@@ -4,6 +4,7 @@ import {
   getTestnetCredentials,
   type Repositories,
   type ReviewStatus,
+  type Timeframe,
 } from '@tse/core';
 import { HttpError, Router } from './router.js';
 
@@ -64,13 +65,16 @@ export function buildRoutes(deps: RouteDeps): Router {
   });
 
   router.get('/api/config', async () => {
-    const approveThreshold = await repositories.bot.approveThreshold();
+    const [approveThreshold, signalTimeframe] = await Promise.all([
+      repositories.bot.approveThreshold(),
+      repositories.bot.signalTimeframe(),
+    ]);
     return {
       status: 200,
       body: {
         account: config.account,
         exposure: config.exposure,
-        volatility: config.volatility,
+        volatility: { ...config.volatility, atrTimeframe: signalTimeframe },
         maxLoss: config.maxLoss,
         planning: config.planning,
         scoring: {
@@ -84,6 +88,8 @@ export function buildRoutes(deps: RouteDeps): Router {
         execution: config.execution,
         schedule: config.schedule,
         instruments: config.instruments,
+        signalTimeframe,
+        chartTimeframes: config.scanner.timeframes,
       },
     };
   });
@@ -96,21 +102,40 @@ export function buildRoutes(deps: RouteDeps): Router {
       repositories.execution.lastTrade(),
     ]);
     const testnetConfigured = Boolean(getTestnetCredentials());
+    const unrealisedPnl = openPositions.reduce((sum, p) => sum + (p.unrealisedPnl ?? 0), 0);
+    const totalPnl = portfolio.dayRealisedPnl + unrealisedPnl;
     return {
       status: 200,
       body: {
         mode: bot.executionMode,
         paused: bot.paused,
         approveThreshold: bot.approveThreshold,
+        signalTimeframe: bot.signalTimeframe,
         testnetConfigured,
         updatedAt: bot.updatedAt,
         equity: portfolio.equity,
+        markEquity: portfolio.equity + unrealisedPnl,
         dayRealisedPnl: portfolio.dayRealisedPnl,
+        unrealisedPnl,
+        totalPnl,
         openCount: openPositions.length,
         openPositions,
         lastTrade: lastTrade ?? null,
       },
     };
+  });
+
+  router.put('/api/bot/signal-timeframe', async (ctx) => {
+    const body = (ctx.body ?? {}) as { timeframe?: unknown };
+    const timeframe = body.timeframe;
+    if (typeof timeframe !== 'string' || !config.scanner.timeframes.includes(timeframe as Timeframe)) {
+      throw new HttpError(
+        400,
+        `timeframe must be one of: ${config.scanner.timeframes.join(', ')}`,
+      );
+    }
+    await repositories.bot.setSignalTimeframe(timeframe as Timeframe);
+    return { status: 200, body: { ok: true, timeframe } };
   });
 
   router.put('/api/bot/approve-threshold', async (ctx) => {

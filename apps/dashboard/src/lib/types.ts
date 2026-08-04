@@ -117,10 +117,14 @@ export interface BotStatus {
   mode: string;
   paused: boolean;
   approveThreshold: number;
+  signalTimeframe: string;
   testnetConfigured: boolean;
   updatedAt?: string;
   equity: number;
+  markEquity: number;
   dayRealisedPnl: number;
+  unrealisedPnl: number;
+  totalPnl: number;
   openCount: number;
   openPositions: OpenPosition[];
   lastTrade: TradeRecord | null;
@@ -137,6 +141,8 @@ export interface OpenPosition {
   notional: number;
   openedAt: string;
   memoId?: number;
+  markPrice?: number;
+  unrealisedPnl?: number;
 }
 
 export interface TradeRecord {

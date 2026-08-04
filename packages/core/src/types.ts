@@ -248,6 +248,8 @@ export interface OpenPosition {
   memoId?: number;
   orderId?: number;
   source?: 'bot' | 'manual';
+  markPrice?: number;
+  unrealisedPnl?: number;
 }
 
 export interface PortfolioState {
